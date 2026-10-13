@@ -1,29 +1,39 @@
 # CITY WATCH — Miejskie RP 3D
 
-Pakiet do uruchomienia gry w przeglądarce na Renderze.
+Przeglądarkowa gra roleplay 3D (Three.js) w jednym pliku HTML.
+Role: **Policja, Straż pożarna (OSP), PRM (ratownictwo medyczne), Pomoc drogowa, Cywil**.
 
-## Publikacja na Render
+## Sterowanie
 
-1. Rozpakuj ZIP.
-2. Wgraj wszystkie pliki i folder `static` do nowego repozytorium GitHub.
-3. Na Render wybierz **New + → Blueprint** i wskaż repozytorium z plikiem `render.yaml`.
-   Alternatywnie wybierz **New + → Web Service**, a następnie:
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `gunicorn server:app`
-4. Po wdrożeniu otwórz adres Rendera. Gra znajduje się na stronie głównej `/`.
-   Endpoint `/health` służy do sprawdzenia, czy serwer działa.
+| Klawisz | Akcja |
+|---|---|
+| W / S / A / D | przód / tył / lewo / prawo (pieszo i w aucie) |
+| Prawy przycisk myszy (przytrzymaj) | kamera |
+| E | wsiądź / wysiądź |
+| F | sygnały (policja, straż, PRM) |
+| H | pomoc / zabranie poszkodowanego / legitymowanie / holowanie (zależnie od roli) |
+| R | gaszenie (straż) |
+| C / X / L | pachołek / zbierz pachołki / lizak |
+| / | czat (ENTER wysyła) |
 
-## Test lokalny
+## Multiplayer
 
-`pip install -r requirements.txt`
+Na ekranie startowym wpisz **nick** i **kod pokoju**. Wszyscy, którzy wpiszą ten sam kod, grają razem.
+Puste pole kodu = gra solo. Pierwsza osoba w pokoju zostaje hostem, jeśli host wyjdzie, pokój łączy się ponownie
+i hostem zostaje ktoś inny.
 
-`python server.py`
+Synchronizowane są: pozycje graczy, pojazdy, role i stroje, sygnały świetlne oraz czat.
+Nie są synchronizowane: ruch NPC, wypadki, pożary i pieniądze (każdy gracz ma własne).
 
-Następnie otwórz `http://127.0.0.1:10000`.
+Multiplayer działa przez WebRTC (biblioteka PeerJS) i publiczny serwer pośredniczący PeerJS, więc nie potrzebuje
+własnego serwera. Przy bardzo restrykcyjnych sieciach (np. niektóre sieci firmowe/szkolne) połączenie może się nie udać.
 
-## Ważne
+## Publikacja na GitHub Pages
 
-To jest wersja przeglądarkowa gry z przesłanego pliku HTML. Render udostępnia ją przez internet,
-ale ten pakiet **nie dodaje jeszcze prawdziwego trybu wieloosobowego** — rozgrywka i czat z
-oryginalnego pliku działają lokalnie w przeglądarce. Three.js i fonty są pobierane z CDN,
-więc do ich załadowania potrzebne jest połączenie z internetem.
+1. Utwórz nowe repozytorium (**New repository**), np. `city-watch`, ustaw je jako **Public**.
+2. Wgraj pliki z tego folderu: `index.html`, `README.md` i `.nojekyll` (**Add file → Upload files**).
+3. Wejdź w **Settings → Pages**. W sekcji *Build and deployment* wybierz **Deploy from a branch**,
+   gałąź **main** i folder **/ (root)**, potem **Save**.
+4. Po 1–2 minutach gra będzie pod adresem `https://TWOJ-LOGIN.github.io/city-watch/`.
+
+Gra wczytuje Three.js i PeerJS z internetu (cdnjs i unpkg), więc do działania potrzebuje połączenia z siecią.

@@ -121,6 +121,12 @@
   #chatBox input{ width:100%; box-sizing:border-box; padding:10px 12px; font-size:15px; background:rgba(10,12,16,.88); color:#fff;
     border:2px solid var(--amber); border-radius:6px; outline:none; font-family:inherit; }
   #chatBox .hint{ font-size:11px; opacity:.65; margin-top:4px; letter-spacing:.06em; }
+  #mpBox{ display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin:14px 0 4px; }
+  #mpBox input{ padding:10px 12px; font-size:15px; background:rgba(10,12,16,.7); color:#fff; border:2px solid rgba(255,255,255,.25); border-radius:6px; outline:none; font-family:inherit; width:210px; }
+  #mpBox input:focus{ border-color:var(--amber); }
+  #mpBox .mpHint{ width:100%; text-align:center; font-size:12px; opacity:.65; }
+  #mpStatus{ position:fixed; right:22px; bottom:20px; z-index:20; display:none; font-size:12px; letter-spacing:.08em; padding:6px 10px; background:rgba(10,12,16,.7); border-left:3px solid #3ddc84; border-radius:4px; color:#fff; pointer-events:none; }
+  #mpStatus.warn{ border-left-color:#ff6b5e; color:#ffb3ab; }
 </style>
 </head>
 <body>
@@ -172,6 +178,7 @@
   </div>
   <div id="compass" class="stencil">CITY WATCH</div>
   <div id="chatLog"></div>
+  <div id="mpStatus"></div>
   <div id="chatBox"><input id="chatInput" type="text" maxlength="80" autocomplete="off" placeholder="Napisz wiadomość…"><div class="hint">ENTER — wyślij &nbsp;|&nbsp; ESC — anuluj</div></div>
 
 </div>
@@ -180,6 +187,11 @@
   <div class="panel">
     <div class="title stencil">CITY WATCH</div>
     <div class="subtitle">MIEJSKIE RP 3D — WYBIERZ ROLĘ</div>
+    <div id="mpBox">
+      <input id="mpName" maxlength="16" autocomplete="off" placeholder="Twój nick">
+      <input id="mpRoom" maxlength="20" autocomplete="off" placeholder="Kod pokoju (multiplayer)">
+      <div class="mpHint">Chcesz grać ze znajomymi? Wpisz ten sam kod pokoju (np. MIASTO1). Puste pole = gra solo.</div>
+    </div>
     <div class="roleChoice">
       <div class="roleCard" id="pickPolice">
         <div class="rt stencil">POLICJA</div>
@@ -222,6 +234,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -2828,6 +2841,56 @@
   document.getElementById('pickLaweta').addEventListener('click', () => selectRole('laweta'));
   document.getElementById('pickPrm').addEventListener('click', () => selectRole('prm'));
   document.getElementById('pickCiv').addEventListener('click', () => selectRole('civ'));
+  // Role look + vehicle factories (shared by the local player and by remote players in multiplayer)
+  function applyRoleLook(p, r){
+    const ud = p.userData;
+    if(r==='police'){
+      ud.torsoMesh.material = policeTorsoMats;
+      ud.leftArmMesh.material = policeArmMatsLeft;
+      ud.rightArmMesh.material = policeArmMatsRight;
+      ud.legMat.color.set(0x11141a);
+      ud.hiVisStripes.forEach(st => st.visible = false);
+      ud.helmetGroup.visible = false;
+    } else if(r==='straz'){
+      ud.torsoMesh.material = strazTorsoMats;
+      ud.leftArmMesh.material = strazArmMatsLeft;
+      ud.rightArmMesh.material = strazArmMatsRight;
+      ud.legMat.color.set(0x1b1b1b);
+      ud.hiVisStripes.forEach(st => st.visible = true);
+      ud.helmetGroup.visible = true;
+    } else if(r==='prm'){
+      ensurePrmParts(p);
+      ud.torsoMesh.material = prmTorsoMats;
+      ud.leftArmMesh.material = ud.civLeftArmMat;   // bare forearms under the red sleeves
+      ud.rightArmMesh.material = ud.civRightArmMat;
+      ud.legMat.color.set(0xff5a1f);                // hi-vis orange trousers
+      ud.hiVisStripes.forEach(st => { st.visible = true; st.material.color.set(0xd5d9dc); st.material.emissive.set(0x2a2c2e); });
+      ud.helmetGroup.visible = false;
+    } else if(r==='laweta'){
+      ud.torsoMesh.material = ud.civTorsoMat;
+      ud.leftArmMesh.material = ud.civLeftArmMat;
+      ud.rightArmMesh.material = ud.civRightArmMat;
+      ud.torsoMesh.material.color.set(0xff8a1f);
+      ud.legMat.color.set(0x2b2f36);
+      ud.hiVisStripes.forEach(st => st.visible = true);
+      ud.helmetGroup.visible = false;
+    } else {
+      ud.torsoMesh.material = ud.civTorsoMat;
+      ud.leftArmMesh.material = ud.civLeftArmMat;
+      ud.rightArmMesh.material = ud.civRightArmMat;
+      ud.torsoMesh.material.color.set(0x8a2d2d);
+      ud.legMat.color.set(0x2b3a67);
+      ud.hiVisStripes.forEach(st => st.visible = false);
+      ud.helmetGroup.visible = false;
+    }
+  }
+  function createVehicleForRole(r){
+    if(r==='straz') return createFireTruck();
+    if(r==='prm') return createAmbulance();
+    if(r==='laweta') return createTowTruck();
+    return createCar(r==='police' ? 0x1c3a6e : (0x882222+Math.floor(Math.random()*0x111111)), r==='police');
+  }
+
   const startBtn = document.getElementById('startBtn');
 
   const roleCardIds = { police:'pickPolice', straz:'pickStraz', prm:'pickPrm', laweta:'pickLaweta', civ:'pickCiv' };
@@ -2864,55 +2927,9 @@
     if(role==='straz'||role==='police'||role==='laweta'){ strazConeCount = STRAZ_CONE_CARRY_MAX; updateEqHud(); }
     if(role==='straz'||role==='prm'){ medKitCount = MEDKIT_CARRY_MAX; updateEqHud(); }
 
-    if(role==='police'){
-      player.userData.torsoMesh.material = policeTorsoMats;
-      player.userData.leftArmMesh.material = policeArmMatsLeft;
-      player.userData.rightArmMesh.material = policeArmMatsRight;
-      player.userData.legMat.color.set(0x11141a);
-      player.userData.hiVisStripes.forEach(s => s.visible = false);
-      player.userData.helmetGroup.visible = false;
-    } else if(role==='straz'){
-      player.userData.torsoMesh.material = strazTorsoMats;
-      player.userData.leftArmMesh.material = strazArmMatsLeft;
-      player.userData.rightArmMesh.material = strazArmMatsRight;
-      player.userData.legMat.color.set(0x1b1b1b);
-      player.userData.hiVisStripes.forEach(s => s.visible = true);
-      player.userData.helmetGroup.visible = true;
-    } else if(role==='prm'){
-      ensurePrmParts(player);
-      player.userData.torsoMesh.material = prmTorsoMats;
-      player.userData.leftArmMesh.material = player.userData.civLeftArmMat;   // bare forearms under the red sleeves
-      player.userData.rightArmMesh.material = player.userData.civRightArmMat;
-      player.userData.legMat.color.set(0xff5a1f);                              // hi-vis orange trousers
-      player.userData.hiVisStripes.forEach(st => { st.visible = true; st.material.color.set(0xd5d9dc); st.material.emissive.set(0x2a2c2e); });
-      player.userData.helmetGroup.visible = false;
-    } else if(role==='laweta'){
-      player.userData.torsoMesh.material = player.userData.civTorsoMat;
-      player.userData.leftArmMesh.material = player.userData.civLeftArmMat;
-      player.userData.rightArmMesh.material = player.userData.civRightArmMat;
-      player.userData.torsoMesh.material.color.set(0xff8a1f);
-      player.userData.legMat.color.set(0x2b2f36);
-      player.userData.hiVisStripes.forEach(s => s.visible = true);
-      player.userData.helmetGroup.visible = false;
-    } else {
-      player.userData.torsoMesh.material = player.userData.civTorsoMat;
-      player.userData.leftArmMesh.material = player.userData.civLeftArmMat;
-      player.userData.rightArmMesh.material = player.userData.civRightArmMat;
-      player.userData.torsoMesh.material.color.set(0x8a2d2d);
-      player.userData.legMat.color.set(0x2b3a67);
-      player.userData.hiVisStripes.forEach(s => s.visible = false);
-      player.userData.helmetGroup.visible = false;
-    }
+    applyRoleLook(player, role);
 
-    if(role==='straz'){
-      myCar = createFireTruck();
-    } else if(role==='prm'){
-      myCar = createAmbulance();
-    } else if(role==='laweta'){
-      myCar = createTowTruck();
-    } else {
-      myCar = createCar(role==='police' ? 0x1c3a6e : (0x882222+Math.floor(Math.random()*0x111111)), role==='police');
-    }
+    myCar = createVehicleForRole(role);
     attachSeatLabel(myCar, 0);
     if(role==='straz'){
       // Fire truck is parked INSIDE the OSP garage bay (not spawned on top of the player);
@@ -2931,6 +2948,7 @@
     if(role==='laweta'||role==='prm'){ spawnAllAccidents(); }
 
     gameActive = true;
+    mpInit();
   });
 
   function runActionForCode(code){
@@ -3038,10 +3056,10 @@
     scene.add(spr);
     chatBubble.sprite = spr; chatBubble.tex = tex; chatBubble.timer = 7;
   }
-  function addChatLine(text){
+  function addChatLine(text, who){
     const row = document.createElement('div');
     const nameEl = document.createElement('b');
-    nameEl.textContent = document.getElementById('roleLabelTxt').textContent + ': ';
+    nameEl.textContent = (who || document.getElementById('roleLabelTxt').textContent) + ': ';
     row.appendChild(nameEl);
     row.appendChild(document.createTextNode(text)); // textContent-safe: no HTML injection
     chatLog.appendChild(row);
@@ -3052,8 +3070,9 @@
     const text = chatInput.value.trim();
     closeChat();
     if(!text) return;
-    addChatLine(text);
+    addChatLine(text, mp.enabled ? mp.name : undefined);
     showChatBubble(text);
+    mpBroadcast({ t:'c', n:mp.name, m:text });
   }
   chatInput.addEventListener('keydown', e => {
     e.stopPropagation();
@@ -3078,8 +3097,244 @@
     }
   }
 
+
+  // ================= Multiplayer (WebRTC through PeerJS — works from plain GitHub Pages, no own server) =================
+  // One player of a room becomes the HOST (peer id "cwrp-<ROOM>"), the others connect to it; the host relays everything.
+  // Synced: positions, vehicles, roles/uniforms, sirens/lights, chat. NOT synced: NPC traffic, accidents, fires, money.
+  const mp = { enabled:false, isHost:false, peer:null, hostConn:null, conns:new Map(), room:'', name:'Gracz', id:'', remotes:new Map(), sendT:0, retry:null };
+  const MP_ROLES = ['police','straz','prm','laweta','civ'];
+  const MP_LABEL = { police:'POLICJA', straz:'STRAŻ', prm:'PRM', laweta:'LAWETA', civ:'CYWIL' };
+  function mpStatus(text, warn){
+    const el = document.getElementById('mpStatus');
+    el.textContent = text;
+    el.style.display = text ? 'block' : 'none';
+    el.classList.toggle('warn', !!warn);
+  }
+  function mpRefreshStatus(){
+    if(!mp.enabled) return;
+    mpStatus('ONLINE · POKÓJ ' + mp.room + ' · GRACZE: ' + (1 + mp.remotes.size) + (mp.isHost ? ' · HOST' : ''));
+  }
+  function mpInit(){
+    const room = document.getElementById('mpRoom').value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'').slice(0,20);
+    mp.name = (document.getElementById('mpName').value.trim() || ('Gracz' + Math.floor(100 + Math.random()*900))).slice(0,16);
+    if(!room){ mpStatus(''); return; } // no room code = single player
+    if(typeof Peer === 'undefined'){ mpStatus('MULTIPLAYER NIEDOSTĘPNY (nie załadowano PeerJS) — gra solo', true); return; }
+    mp.room = room; mp.enabled = true;
+    window.addEventListener('beforeunload', () => { try{ if(mp.peer) mp.peer.destroy(); }catch(e){} });
+    mpConnect();
+  }
+  function mpCleanupNet(){
+    if(mp.retry){ clearTimeout(mp.retry); mp.retry = null; }
+    try{ if(mp.peer) mp.peer.destroy(); }catch(e){}
+    mp.peer = null; mp.hostConn = null; mp.conns.clear(); mp.isHost = false;
+    Array.from(mp.remotes.keys()).forEach(id => mpRemoveRemote(id, true));
+  }
+  function mpRetryLater(ms){
+    if(mp.retry) return;
+    mp.retry = setTimeout(() => { mp.retry = null; mpConnect(); }, ms);
+  }
+  function mpFail(err){
+    mpStatus('BŁĄD SIECI' + (err && err.type ? ' (' + err.type + ')' : '') + ' — ponawiam…', true);
+    try{ if(mp.peer) mp.peer.destroy(); }catch(e){}
+    mp.peer = null; mp.hostConn = null; mp.isHost = false;
+    mpRetryLater(4000 + Math.random()*2000);
+  }
+  function mpLost(){
+    Array.from(mp.remotes.keys()).forEach(id => mpRemoveRemote(id, true));
+    mpStatus('HOST WYSZEDŁ — ŁĄCZĘ PONOWNIE…', true);
+    try{ if(mp.peer) mp.peer.destroy(); }catch(e){}
+    mp.peer = null; mp.hostConn = null;
+    mpRetryLater(1200 + Math.random()*2500);
+  }
+  function mpConnect(){
+    if(mp.retry){ clearTimeout(mp.retry); mp.retry = null; }
+    try{ if(mp.peer) mp.peer.destroy(); }catch(e){}
+    mp.peer = null; mp.hostConn = null; mp.conns.clear(); mp.isHost = false;
+    mpStatus('ŁĄCZĘ Z POKOJEM ' + mp.room + '…');
+    const hostId = 'cwrp-' + mp.room;
+    const hostPeer = new Peer(hostId); // first player in the room gets this id and becomes the host
+    mp.peer = hostPeer;
+    hostPeer.on('open', id => { mp.isHost = true; mp.id = id; mpRefreshStatus(); });
+    hostPeer.on('connection', c => mpHostAccept(c));
+    hostPeer.on('error', err => {
+      if(err && err.type === 'unavailable-id'){ try{ hostPeer.destroy(); }catch(e){} mpJoin(hostId); }
+      else mpFail(err);
+    });
+  }
+  function mpJoin(hostId){
+    const peer = new Peer();
+    mp.peer = peer; mp.isHost = false;
+    peer.on('open', id => {
+      mp.id = id;
+      const c = peer.connect(hostId, { reliable:true });
+      mp.hostConn = c;
+      const timeout = setTimeout(() => { if(!c.open) mpFail({ type:'timeout' }); }, 12000);
+      c.on('open', () => { clearTimeout(timeout); mpRefreshStatus(); });
+      c.on('data', d => mpHandle(d));
+      c.on('close', () => mpLost());
+      c.on('error', e => mpFail(e));
+    });
+    peer.on('error', e => mpFail(e));
+  }
+  function mpHostAccept(c){
+    c.on('open', () => { mp.conns.set(c.peer, c); mpRefreshStatus(); });
+    c.on('data', d => {
+      if(!d || typeof d !== 'object') return;
+      d.i = c.peer; // the host decides who a message is from
+      mpHandle(d);
+      mpRelay(d, c.peer);
+    });
+    c.on('close', () => {
+      mp.conns.delete(c.peer);
+      mpRemoveRemote(c.peer);
+      mpRelay({ t:'b', i:c.peer }, c.peer);
+    });
+    c.on('error', () => {});
+  }
+  function mpRelay(d, exceptId){
+    mp.conns.forEach((c, id) => { if(id !== exceptId && c.open){ try{ c.send(d); }catch(e){} } });
+  }
+  function mpBroadcast(d){
+    if(!mp.enabled || !mp.id) return;
+    d.i = mp.id;
+    if(mp.isHost) mpRelay(d, null);
+    else if(mp.hostConn && mp.hostConn.open){ try{ mp.hostConn.send(d); }catch(e){} }
+  }
+
+  const mpNum = v => (typeof v === 'number' && isFinite(v) && Math.abs(v) < 2000);
+  function mpHandle(d){
+    if(!d || typeof d !== 'object' || typeof d.i !== 'string' || d.i === mp.id) return;
+    const id = d.i.slice(0,64);
+    if(d.t === 's'){
+      if(!MP_ROLES.includes(d.r) || !mpNum(d.x) || !mpNum(d.z) || !mpNum(d.a) || !mpNum(d.cx) || !mpNum(d.cz) || !mpNum(d.ca)) return;
+      mpUpsert(id, d);
+    } else if(d.t === 'c'){
+      if(typeof d.m !== 'string') return;
+      const text = d.m.slice(0,80), name = String(d.n || 'Gracz').slice(0,16);
+      if(!text) return;
+      addChatLine(text, name);
+      const r = mp.remotes.get(id);
+      if(r) mpSetBubble(r, text);
+    } else if(d.t === 'b'){
+      mpRemoveRemote(id);
+    }
+  }
+
+  function mpMakeNameTag(name, r){
+    const c = document.createElement('canvas'); c.width = 256; c.height = 76;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgba(10,12,16,0.7)'; ctx.fillRect(0,0,256,76);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 32px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(name, 128, 28);
+    ctx.fillStyle = '#ffb020'; ctx.font = 'bold 20px Arial';
+    ctx.fillText(MP_LABEL[r] || '', 128, 58);
+    const tex = new THREE.CanvasTexture(c);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false, depthWrite:false }));
+    spr.center.set(0.5, 0);
+    spr.scale.set(2.4, 0.71, 1);
+    spr.renderOrder = 998;
+    return spr;
+  }
+  function mpUpsert(id, d){
+    let r = mp.remotes.get(id);
+    const name = String(d.n || 'Gracz').slice(0,16);
+    if(r && (r.role !== d.r || r.name !== name)){ mpRemoveRemote(id, true); r = null; }
+    if(!r){
+      r = { id, name, role:d.r, person:createPerson(0x888888, 0x2b2f36), car:createVehicleForRole(d.r), tag:mpMakeNameTag(name, d.r), bubble:null,
+            tx:d.x, tz:d.z, ta:d.a, cx:d.cx, cz:d.cz, ca:d.ca, driving:false, siren:false, moving:false, last:performance.now() };
+      applyRoleLook(r.person, d.r);
+      r.person.position.set(d.x, 0, d.z); r.person.rotation.y = d.a;
+      r.car.position.set(d.cx, 0, d.cz); r.car.rotation.y = d.ca;
+      attachSeatLabel(r.car, 0);
+      scene.add(r.person); scene.add(r.car); scene.add(r.tag);
+      mp.remotes.set(id, r);
+      addChatLine(name + ' dołączył do gry', 'SERWER');
+      mpRefreshStatus();
+    }
+    r.moving = Math.hypot(d.x - r.tx, d.z - r.tz) > 0.03;
+    r.tx = d.x; r.tz = d.z; r.ta = d.a; r.cx = d.cx; r.cz = d.cz; r.ca = d.ca;
+    r.driving = !!d.d; r.siren = !!d.sr; r.last = performance.now();
+  }
+  function mpRemoveRemote(id, silent){
+    const r = mp.remotes.get(id);
+    if(!r) return;
+    scene.remove(r.person); scene.remove(r.car); scene.remove(r.tag);
+    const i = seatLabelVehicles.indexOf(r.car);
+    if(i !== -1) seatLabelVehicles.splice(i,1);
+    if(r.bubble){ scene.remove(r.bubble.sprite); r.bubble.tex.dispose(); r.bubble.sprite.material.dispose(); }
+    r.tag.material.map.dispose(); r.tag.material.dispose();
+    mp.remotes.delete(id);
+    if(!silent) addChatLine(r.name + ' opuścił grę', 'SERWER');
+    mpRefreshStatus();
+  }
+  function mpSetBubble(r, text){
+    if(r.bubble){ scene.remove(r.bubble.sprite); r.bubble.tex.dispose(); r.bubble.sprite.material.dispose(); }
+    const b = buildBubble(text);
+    const tex = new THREE.CanvasTexture(b.canvas);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false, depthWrite:false }));
+    spr.center.set(0.5, 0);
+    spr.scale.set(b.cw/95, b.ch/95, 1);
+    spr.renderOrder = 999;
+    scene.add(spr);
+    r.bubble = { sprite:spr, tex:tex, timer:7 };
+  }
+  function mpLerpAngle(a, b, k){ return a + Math.atan2(Math.sin(b-a), Math.cos(b-a)) * k; }
+  function mpUpdate(dt){
+    if(!mp.enabled) return;
+    // --- send my state 10x per second ---
+    mp.sendT -= dt;
+    if(mp.sendT <= 0 && myCar && mp.id){
+      mp.sendT = 0.1;
+      const driving = controlled === 'drive';
+      const pp = driving ? myCar.position : player.position;
+      const r2 = v => Math.round(v*100)/100;
+      mpBroadcast({ t:'s', n:mp.name, r:role, x:r2(pp.x), z:r2(pp.z), a:r2(driving ? myCar.rotation.y : player.rotation.y),
+                    cx:r2(myCar.position.x), cz:r2(myCar.position.z), ca:r2(myCar.rotation.y), d:driving?1:0, sr:sirenOn?1:0 });
+    }
+    // --- show everybody else ---
+    const now = performance.now();
+    mp.remotes.forEach((r, id) => {
+      if(now - r.last > 12000){ mpRemoveRemote(id); return; }
+      const k = Math.min(1, 10*dt);
+      const p = r.person, c = r.car;
+      if(Math.hypot(r.tx - p.position.x, r.tz - p.position.z) > 25){ p.position.x = r.tx; p.position.z = r.tz; }
+      if(Math.hypot(r.cx - c.position.x, r.cz - c.position.z) > 25){ c.position.x = r.cx; c.position.z = r.cz; }
+      p.position.x += (r.tx - p.position.x) * k; p.position.z += (r.tz - p.position.z) * k;
+      c.position.x += (r.cx - c.position.x) * k; c.position.z += (r.cz - c.position.z) * k;
+      p.rotation.y = mpLerpAngle(p.rotation.y, r.ta, k);
+      c.rotation.y = mpLerpAngle(c.rotation.y, r.ca, k);
+      p.visible = !r.driving;
+      updateWalkAnimation(p, dt, r.moving && !r.driving, 1);
+      c.userData.occupants = r.driving ? 1 : 0;
+      const L = c.userData.lights;
+      if(L){
+        if(r.siren){
+          const on = Math.floor(clock.elapsedTime*6) % 2 === 0;
+          L.redPL.intensity = on ? 3 : 0; L.bluePL.intensity = on ? 0 : 3;
+          L.redLamp.material.emissiveIntensity = on ? 2 : 0; L.blueLamp.material.emissiveIntensity = on ? 0 : 2;
+        } else {
+          L.redPL.intensity = 0; L.bluePL.intensity = 0;
+          L.redLamp.material.emissiveIntensity = 0; L.blueLamp.material.emissiveIntensity = 0;
+        }
+      }
+      const lab = c.userData.seatLabel;
+      const bx = r.driving ? c.position.x : p.position.x, bz = r.driving ? c.position.z : p.position.z;
+      const by = r.driving ? (lab ? lab.sprite.position.y + 0.9 : 3.6) : 2.15;
+      r.tag.position.set(bx, by, bz);
+      if(r.bubble){
+        r.bubble.timer -= dt;
+        if(r.bubble.timer <= 0){
+          scene.remove(r.bubble.sprite); r.bubble.tex.dispose(); r.bubble.sprite.material.dispose(); r.bubble = null;
+        } else {
+          r.bubble.sprite.material.opacity = Math.min(1, r.bubble.timer);
+          r.bubble.sprite.position.set(bx, by + 0.85, bz);
+        }
+      }
+    });
+  }
+
   document.addEventListener('keydown', e => {
-    if(chatOpen) return;
+    if(chatOpen || (e.target && e.target.tagName === 'INPUT')) return;
     if(gameActive && (e.key === '/' || e.code === 'Slash')){ e.preventDefault(); openChat(); return; }
     keys[e.code] = true;
     if(e.code === 'Space' && gameActive && controlled==='walk') e.preventDefault();
@@ -3765,6 +4020,7 @@
       updateLightbar();
       updateSeatLabels();
       updateChatBubble(dt);
+      mpUpdate(dt);
       updateCamera(dt);
       updatePrompts();
     }
