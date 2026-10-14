@@ -9,12 +9,20 @@ Role: **Policja, Straż pożarna (OSP), PRM (ratownictwo medyczne), Pomoc drogow
 |---|---|
 | W / S / A / D | przód / tył / lewo / prawo (pieszo i w aucie) |
 | Prawy przycisk myszy (przytrzymaj) | kamera |
-| E | wsiądź / wysiądź |
+| E | wsiądź / wysiądź (w multiplayerze także jako pasażer cudzego auta, do 4 osób) |
 | F | sygnały (policja, straż, PRM) |
 | H | pomoc / zabranie poszkodowanego / legitymowanie / holowanie (zależnie od roli) |
 | R | gaszenie (straż) |
 | C / X / L | pachołek / zbierz pachołki / lizak |
 | / | czat (ENTER wysyła) |
+| G | jakość grafiki (niska / wysoka / ultra z odbiciami nieba) |
+| T | pora dnia: auto / dzień / noc (tylko u Ciebie) |
+
+## Grafika
+
+Cykl dnia i nocy (1 godzina w grze = 1 minuta, ten sam zegar dla wszystkich graczy), dynamiczne cienie,
+niebo z chmurami, słońcem, księżycem i gwiazdami, odbicia nieba na lakierze aut, tekstury asfaltu, trawy,
+tynku i dachówek, lampy i okna zapalane nocą. Na słabszym komputerze wciśnij **G**, żeby obniżyć jakość.
 
 ## Multiplayer
 
@@ -24,7 +32,9 @@ Zaznacz „Gra solo”, jeśli nie chcesz multiplayera. Pierwsza osoba w pokoju 
 pokój łączy się ponownie i hostem zostaje ktoś inny. Host co 8 sekund wysyła aktualny stan świata, więc nikt nie
 „odjeżdża” od reszty.
 
-Synchronizowane są: pozycje graczy, ich pojazdy (także pojazd na lawecie), role i stroje, sygnały świetlne, czat,
+Synchronizowane są: pozycje graczy, ich animacje (chodzenie, kucanie, skok, trzymane przedmioty), pojazdy
+(także pojazd na lawecie), role i stroje, sygnały świetlne, dźwięk syren (słychać je tym głośniej, im bliżej, i z
+odpowiedniej strony), czat,
 pachołki, wypadki (opatrzenie poszkodowanego, zabranie go karetką, przesłuchanie świadków, odholowanie wraków)
 oraz pożary. Gracz, który dołączy do trwającej gry, dostaje aktualny stan świata.
 Nie są synchronizowane: ruch NPC i pieniądze (każdy gracz ma własne).
