@@ -18,9 +18,11 @@ Role: **Policja, Straż pożarna (OSP), PRM (ratownictwo medyczne), Pomoc drogow
 
 ## Multiplayer
 
-Na ekranie startowym wpisz **nick** i **kod pokoju**. Wszyscy, którzy wpiszą ten sam kod, grają razem.
-Puste pole kodu = gra solo. Pierwsza osoba w pokoju zostaje hostem, jeśli host wyjdzie, pokój łączy się ponownie
-i hostem zostaje ktoś inny.
+Na ekranie startowym wpisz **nick**. Domyślnie wszyscy trafiają na ten sam **serwer główny** i widzą ten sam świat.
+Możesz wpisać własny **kod pokoju** (np. `MIASTO1`) — wtedy grają razem tylko osoby z tym samym kodem.
+Zaznacz „Gra solo”, jeśli nie chcesz multiplayera. Pierwsza osoba w pokoju zostaje hostem; jeśli host wyjdzie,
+pokój łączy się ponownie i hostem zostaje ktoś inny. Host co 8 sekund wysyła aktualny stan świata, więc nikt nie
+„odjeżdża” od reszty.
 
 Synchronizowane są: pozycje graczy, ich pojazdy (także pojazd na lawecie), role i stroje, sygnały świetlne, czat,
 pachołki, wypadki (opatrzenie poszkodowanego, zabranie go karetką, przesłuchanie świadków, odholowanie wraków)

@@ -124,6 +124,8 @@
   #mpBox{ display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin:14px 0 4px; }
   #mpBox input{ padding:10px 12px; font-size:15px; background:rgba(10,12,16,.7); color:#fff; border:2px solid rgba(255,255,255,.25); border-radius:6px; outline:none; font-family:inherit; width:210px; }
   #mpBox input:focus{ border-color:var(--amber); }
+  #mpBox .mpSolo{ display:flex; align-items:center; gap:6px; font-size:13px; opacity:.85; cursor:pointer; }
+  #mpBox .mpSolo input{ width:auto; }
   #mpBox .mpHint{ width:100%; text-align:center; font-size:12px; opacity:.65; }
   #mpStatus{ position:fixed; right:22px; bottom:20px; z-index:20; display:none; font-size:12px; letter-spacing:.08em; padding:6px 10px; background:rgba(10,12,16,.7); border-left:3px solid #3ddc84; border-radius:4px; color:#fff; pointer-events:none; }
   #mpStatus.warn{ border-left-color:#ff6b5e; color:#ffb3ab; }
@@ -189,8 +191,9 @@
     <div class="subtitle">MIEJSKIE RP 3D — WYBIERZ ROLĘ</div>
     <div id="mpBox">
       <input id="mpName" maxlength="16" autocomplete="off" placeholder="Twój nick">
-      <input id="mpRoom" maxlength="20" autocomplete="off" placeholder="Kod pokoju (multiplayer)">
-      <div class="mpHint">Chcesz grać ze znajomymi? Wpisz ten sam kod pokoju (np. MIASTO1). Puste pole = gra solo.</div>
+      <input id="mpRoom" maxlength="20" autocomplete="off" placeholder="Pokój (puste = serwer główny)">
+      <label class="mpSolo"><input type="checkbox" id="mpSolo"> Gra solo (bez multiplayera)</label>
+      <div class="mpHint">Domyślnie wszyscy trafiają na ten sam serwer główny i widzą to samo. Własny kod pokoju (np. MIASTO1) = prywatna gra ze znajomymi.</div>
     </div>
     <div class="roleChoice">
       <div class="roleCard" id="pickPolice">
@@ -3143,9 +3146,9 @@
     mpStatus('ONLINE · POKÓJ ' + mp.room + ' · GRACZE: ' + (1 + mp.remotes.size) + (mp.isHost ? ' · HOST' : ''));
   }
   function mpInit(){
-    const room = document.getElementById('mpRoom').value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'').slice(0,20);
+    const room = document.getElementById('mpRoom').value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'').slice(0,20) || 'GLOWNY';
     mp.name = (document.getElementById('mpName').value.trim() || ('Gracz' + Math.floor(100 + Math.random()*900))).slice(0,16);
-    if(!room){ mpStatus(''); return; } // no room code = single player
+    if(document.getElementById('mpSolo').checked){ mpStatus(''); return; } // solo game
     if(typeof Peer === 'undefined'){ mpStatus('MULTIPLAYER NIEDOSTĘPNY (nie załadowano PeerJS) — gra solo', true); return; }
     mp.room = room; mp.enabled = true;
     spawnAllAccidents(); spawnAllFires(); // same deterministic world for every role in a room
@@ -3258,6 +3261,7 @@
   let mpConeSeq = 0;
   function mpWorld(k, data){
     if(!mp.enabled) return;
+    mp.lastWorldAction = performance.now();
     mpBroadcast(Object.assign({ t:'w', k:k }, data));
   }
   function mpAcc(spot){ return accidents.find(a => a.spotIdx === spot); }
@@ -3321,25 +3325,34 @@
   }
   function mpApplySnapshot(d){
     if(!Array.isArray(d.acc) || !Array.isArray(d.fi) || !Array.isArray(d.co)) return;
-    accidents.slice().forEach(a => mpRemoveAccident(a));
-    fires.slice().forEach(f => { scene.remove(f.mesh); });
-    fires.length = 0;
-    d.fi.forEach(sp => { if(mpNum(sp)) spawnFire(sp|0); });
-    d.acc.slice(0,12).forEach(o => {
-      if(!o || !mpNum(o.s) || !mpNum(o.seed)) return;
-      const a = spawnAccident(o.s|0, o.seed|0);
-      if(!a) return;
+    // right after one of MY actions an older snapshot could still be on its way — skip it
+    if(performance.now() - (mp.lastWorldAction || 0) < 2500) return;
+    // accidents
+    const wantA = new Map();
+    d.acc.slice(0,12).forEach(o => { if(o && mpNum(o.s) && mpNum(o.seed)) wantA.set(o.s|0, o); });
+    accidents.slice().forEach(a => { const o = wantA.get(a.spotIdx); if(!o || (o.seed|0) !== a.seed) mpRemoveAccident(a); });
+    wantA.forEach((o, spot) => {
+      let a = mpAcc(spot);
+      if(!a){ a = spawnAccident(spot, o.seed|0); if(!a) return; }
       if(!o.w1 && a.wreck.parent === a.mesh) a.mesh.remove(a.wreck);
       if(!o.w2 && a.wreck2.parent === a.mesh) a.mesh.remove(a.wreck2);
-      if(o.tr){
+      if(o.tr && !a.victimTreated){
         a.victimTreated = true; a.treatedStand = !!o.st;
         if(o.st){ a.standT = 1; a.victim.rotation.x = 0; a.victim.position.y = 0; }
       }
-      a.interrogated = !!o.it;
-      if(o.ld){ a.victimLoaded = true; a.victim.visible = false; }
+      if(o.it) a.interrogated = true;
+      if(o.ld && !a.victimLoaded){ a.victimLoaded = true; a.victim.visible = false; }
     });
-    activeCones.filter(c => c.userData.cid && !String(c.userData.cid).startsWith(mp.id + '-')).forEach(c => mpRemoveConeById(c.userData.cid));
-    d.co.slice(0,60).forEach(c => { if(c) mpAddRemoteCone(c.id, c.x, c.z); });
+    // fires
+    const wantF = new Set(d.fi.filter(mpNum).map(v => v|0));
+    fires.slice().forEach(f => { if(!wantF.has(f.spotIdx)){ scene.remove(f.mesh); fires.splice(fires.indexOf(f),1); } });
+    wantF.forEach(sp => spawnFire(sp)); // spawnFire ignores spots that already burn
+    // cones placed by other players
+    const wantC = new Map();
+    d.co.slice(0,80).forEach(c => { if(c && typeof c.id === 'string') wantC.set(c.id, c); });
+    activeCones.filter(c => c.userData.cid && !String(c.userData.cid).startsWith(mp.id + '-') && !wantC.has(c.userData.cid))
+               .forEach(c => mpRemoveConeById(c.userData.cid));
+    wantC.forEach(c => mpAddRemoteCone(c.id, c.x, c.z));
   }
 
   function mpMakeNameTag(name, r){
@@ -3412,6 +3425,13 @@
       const r2 = v => Math.round(v*100)/100;
       mpBroadcast({ t:'s', n:mp.name, r:role, x:r2(pp.x), z:r2(pp.z), a:r2(driving ? myCar.rotation.y : player.rotation.y),
                     cx:r2(myCar.position.x), cz:r2(myCar.position.z), ca:r2(myCar.rotation.y), d:driving?1:0, sr:sirenOn?1:0, wr:mountedWreck?1:0 });
+    }
+    // --- the host keeps everybody in sync: full world state every 8 seconds ---
+    mp.snapT = (mp.snapT || 0) - dt;
+    if(mp.isHost && mp.snapT <= 0 && mp.conns.size){
+      mp.snapT = 8;
+      const sn = mpSnapshot();
+      mp.conns.forEach(c => { if(c.open){ try{ c.send(sn); }catch(e){} } });
     }
     // --- show everybody else ---
     const now = performance.now();
