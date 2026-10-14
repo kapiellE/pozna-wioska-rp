@@ -22,8 +22,10 @@ Na ekranie startowym wpisz **nick** i **kod pokoju**. Wszyscy, którzy wpiszą t
 Puste pole kodu = gra solo. Pierwsza osoba w pokoju zostaje hostem, jeśli host wyjdzie, pokój łączy się ponownie
 i hostem zostaje ktoś inny.
 
-Synchronizowane są: pozycje graczy, pojazdy, role i stroje, sygnały świetlne oraz czat.
-Nie są synchronizowane: ruch NPC, wypadki, pożary i pieniądze (każdy gracz ma własne).
+Synchronizowane są: pozycje graczy, ich pojazdy (także pojazd na lawecie), role i stroje, sygnały świetlne, czat,
+pachołki, wypadki (opatrzenie poszkodowanego, zabranie go karetką, przesłuchanie świadków, odholowanie wraków)
+oraz pożary. Gracz, który dołączy do trwającej gry, dostaje aktualny stan świata.
+Nie są synchronizowane: ruch NPC i pieniądze (każdy gracz ma własne).
 
 Multiplayer działa przez WebRTC (biblioteka PeerJS) i publiczny serwer pośredniczący PeerJS, więc nie potrzebuje
 własnego serwera. Przy bardzo restrykcyjnych sieciach (np. niektóre sieci firmowe/szkolne) połączenie może się nie udać.

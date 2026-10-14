@@ -2376,6 +2376,7 @@
   const waterTex = buildWaterTexture();
 
   function spawnFire(idx){
+    if(fires.some(f => f.spotIdx === idx % fireSpots.length)) return false;
     const spot = fireSpots[idx % fireSpots.length];
     const group = new THREE.Group();
     const flameMat = new THREE.SpriteMaterial({ map:flameTex, transparent:true, depthWrite:false });
@@ -2389,6 +2390,7 @@
     group.position.copy(spot);
     scene.add(group);
     fires.push({ mesh:group, light, phase:Math.random()*Math.PI*2, spotIdx: idx % fireSpots.length });
+    return true;
   }
   function spawnAllFires(){
     if(fires.length) return;
@@ -2397,6 +2399,7 @@
   function extinguishFire(fire){
     const idx = fires.indexOf(fire);
     if(idx === -1) return;
+    mpWorld('fireOut', { spot: fire.spotIdx });
     scene.remove(fire.mesh);
     fires.splice(idx,1);
     money += 100; firesOut += 1;
@@ -2404,7 +2407,10 @@
     document.getElementById('fireVal').textContent = firesOut;
     showPrompt('Pożar ugaszony (+100).');
     setTimeout(() => {
-      if(role==='straz' && gameActive) spawnFire(Math.floor(Math.random()*fireSpots.length));
+      if(role==='straz' && gameActive){
+        const fi = Math.floor(Math.random()*fireSpots.length);
+        if(spawnFire(fi) !== false) mpWorld('fireNew', { idx: fi });
+      }
     }, 5000);
   }
 
@@ -2525,19 +2531,26 @@
   }
   const smokeTex = buildSmokeTexture();
 
-  function spawnAccident(idx){
+  function mkRng(seed){
+    let a = seed >>> 0;
+    return function(){ a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function spawnAccident(idx, seed){
+    if(accidents.some(a => a.spotIdx === idx % accidentSpots.length)) return null; // one accident per spot
+    const seedUsed = (seed == null) ? Math.floor(Math.random()*1e9) : seed;
+    const rng = mkRng(seedUsed); // same seed => same wrecks on every player's screen
     const spot = accidentSpots[idx % accidentSpots.length];
     const group = new THREE.Group();
     group.position.copy(spot);
 
     // wrecked car, skewed off its line like it span out
-    const wreck = createCar(npcColors[Math.floor(Math.random()*npcColors.length)], false);
-    wreck.rotation.y = Math.random()*Math.PI*2;
+    const wreck = createCar(npcColors[Math.floor(rng()*npcColors.length)], false);
+    wreck.rotation.y = rng()*Math.PI*2;
     wreck.rotation.z = 0.12;
     group.add(wreck);
 
     // second car, nose-in at an angle — looks like a collision
-    const wreck2 = createCar(npcColors[Math.floor(Math.random()*npcColors.length)], false);
+    const wreck2 = createCar(npcColors[Math.floor(rng()*npcColors.length)], false);
     wreck2.position.set(2.6, 0, 1.4);
     wreck2.rotation.y = wreck.rotation.y + 0.9;
     group.add(wreck2);
@@ -2555,14 +2568,18 @@
     group.add(victim);
 
     scene.add(group);
-    accidents.push({ mesh:group, wreck, wreck2, victim, smokeSprites:[sm1,sm2], phase:Math.random()*Math.PI*2, spotIdx: idx % accidentSpots.length, victimTreated:false, interrogated:false });
+    const accObj = { mesh:group, wreck, wreck2, victim, smokeSprites:[sm1,sm2], phase:Math.random()*Math.PI*2, spotIdx: idx % accidentSpots.length, seed:seedUsed, victimTreated:false, interrogated:false };
+    accidents.push(accObj);
+    return accObj;
   }
   function spawnAllAccidents(){
     if(accidents.length) return;
-    for(let i=0;i<2;i++) spawnAccident(i);
+    for(let i=0;i<2;i++) spawnAccident(i, 1000 + i);
   }
   function treatVictim(acc){
     acc.victimTreated = true;
+    acc.treatedStand = (role !== 'prm');
+    mpWorld('treat', { spot: acc.spotIdx, st: acc.treatedStand ? 1 : 0 });
     if(role !== 'prm') acc.standT = 0; // drives the stand-up animation in updateAccidents (PRM patients just stay lying down)
     money += 120; accidentsHelped += 1;
     renderMoney();
@@ -2629,6 +2646,7 @@
       const acc = interrogateState.targetAccident;
       stopInterrogate();
       acc.interrogated = true;
+      mpWorld('interrog', { spot: acc.spotIdx });
       money += 60; statementsTaken += 1;
       renderMoney();
       document.getElementById('statementVal').textContent = statementsTaken;
@@ -2654,6 +2672,7 @@
     if(!carToTow) return;
 
     acc.mesh.remove(carToTow);
+    mpWorld('tow', { spot: acc.spotIdx, w: (carToTow === acc.wreck2 ? 2 : 1), gone: pickTowableCar(acc) ? 0 : 1 });
     carToTow.position.set(DECK_MOUNT.x, DECK_MOUNT.y, DECK_MOUNT.z);
     carToTow.rotation.set(0, 0, 0);
     carToTow.scale.set(0.82, 0.82, 0.82);
@@ -2668,7 +2687,7 @@
         scene.remove(acc.mesh);
         accidents.splice(idx,1);
         setTimeout(() => {
-          if((role==='laweta'||role==='straz') && gameActive) spawnAccident(Math.floor(Math.random()*accidentSpots.length));
+          if((role==='laweta'||role==='straz') && gameActive) spawnAccidentShared(pickFreeAccidentSpot());
         }, 7000);
       }
     }
@@ -2723,14 +2742,22 @@
 
   // ---- PRM: load treated patients into the ambulance and deliver them to the hospital ----
   const AMB_MAX_PATIENTS = VEHICLE_SEATS - 1; // one seat is the driver's
-  function replaceAccident(acc){
-    const i = accidents.indexOf(acc);
-    if(i === -1 || !gameActive) return;
-    scene.remove(acc.mesh); accidents.splice(i,1);
+  function pickFreeAccidentSpot(){
     const used = accidents.map(a => a.spotIdx);
     const free = accidentSpots.map((_,k) => k).filter(k => !used.includes(k));
     const pool = free.length ? free : accidentSpots.map((_,k) => k);
-    spawnAccident(pool[Math.floor(Math.random()*pool.length)]);
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+  function spawnAccidentShared(idx){
+    const seed = Math.floor(Math.random()*1e9);
+    if(spawnAccident(idx, seed)) mpWorld('accNew', { idx: idx, seed: seed });
+  }
+  function replaceAccident(acc){
+    const i = accidents.indexOf(acc);
+    if(i === -1 || !gameActive) return;
+    mpWorld('accGone', { spot: acc.spotIdx });
+    scene.remove(acc.mesh); accidents.splice(i,1);
+    spawnAccidentShared(pickFreeAccidentSpot());
   }
   function loadVictim(acc){
     if(!myCar || !myCar.userData.isAmbulance) return;
@@ -2738,6 +2765,7 @@
     if(myCar.position.distanceTo(acc.mesh.position) > 14){ showPrompt('Podjedź karetką bliżej poszkodowanego (max 14 m).'); return; }
     acc.victimLoaded = true;
     acc.victim.visible = false;
+    mpWorld('load', { spot: acc.spotIdx });
     myCar.userData.patients += 1;
     showPrompt('Poszkodowany w karetce (' + myCar.userData.patients + '/' + AMB_MAX_PATIENTS + ') — zawieź go do szpitala.');
     setTimeout(() => replaceAccident(acc), 1500);
@@ -3120,6 +3148,7 @@
     if(!room){ mpStatus(''); return; } // no room code = single player
     if(typeof Peer === 'undefined'){ mpStatus('MULTIPLAYER NIEDOSTĘPNY (nie załadowano PeerJS) — gra solo', true); return; }
     mp.room = room; mp.enabled = true;
+    spawnAllAccidents(); spawnAllFires(); // same deterministic world for every role in a room
     window.addEventListener('beforeunload', () => { try{ if(mp.peer) mp.peer.destroy(); }catch(e){} });
     mpConnect();
   }
@@ -3177,7 +3206,7 @@
     peer.on('error', e => mpFail(e));
   }
   function mpHostAccept(c){
-    c.on('open', () => { mp.conns.set(c.peer, c); mpRefreshStatus(); });
+    c.on('open', () => { mp.conns.set(c.peer, c); mpRefreshStatus(); try{ c.send(mpSnapshot()); }catch(e){} });
     c.on('data', d => {
       if(!d || typeof d !== 'object') return;
       d.i = c.peer; // the host decides who a message is from
@@ -3217,7 +3246,100 @@
       if(r) mpSetBubble(r, text);
     } else if(d.t === 'b'){
       mpRemoveRemote(id);
+    } else if(d.t === 'w'){
+      mpApplyWorld(d);
+    } else if(d.t === 'snap' && !mp.isHost){
+      mpApplySnapshot(d);
     }
+  }
+
+
+  // ---- shared world: every action on cones / accidents / fires is sent to the other players ----
+  let mpConeSeq = 0;
+  function mpWorld(k, data){
+    if(!mp.enabled) return;
+    mpBroadcast(Object.assign({ t:'w', k:k }, data));
+  }
+  function mpAcc(spot){ return accidents.find(a => a.spotIdx === spot); }
+  function mpRemoveAccident(a){
+    const i = accidents.indexOf(a);
+    if(i === -1) return;
+    scene.remove(a.mesh); accidents.splice(i,1);
+  }
+  function mpAddRemoteCone(id, x, z){
+    if(typeof id !== 'string' || !mpNum(x) || !mpNum(z)) return;
+    if(activeCones.some(c => c.userData.cid === id)) return;
+    const c = createCone();
+    c.position.set(x, 0, z);
+    c.userData.cid = id.slice(0,80);
+    scene.add(c);
+    activeCones.push(c);
+  }
+  function mpRemoveConeById(id){
+    const i = activeCones.findIndex(c => c.userData.cid === id);
+    if(i === -1) return;
+    scene.remove(activeCones[i]);
+    activeCones.splice(i,1);
+    const j = strazPlacedCones.findIndex(c => c.userData.cid === id);
+    if(j !== -1) strazPlacedCones.splice(j,1);
+  }
+  function mpApplyWorld(d){
+    switch(d.k){
+      case 'cone': mpAddRemoteCone(d.id, d.x, d.z); break;
+      case 'coneRm': if(typeof d.id === 'string') mpRemoveConeById(d.id); break;
+      case 'coneClear':
+        activeCones.forEach(c => scene.remove(c));
+        activeCones.length = 0; strazPlacedCones.length = 0;
+        npcs.forEach(n => { n.cones = null; });
+        break;
+      case 'treat': { const a = mpAcc(d.spot); if(a){ a.victimTreated = true; a.treatedStand = !!d.st; if(d.st) a.standT = 0; } break; }
+      case 'interrog': { const a = mpAcc(d.spot); if(a) a.interrogated = true; break; }
+      case 'load': { const a = mpAcc(d.spot); if(a){ a.victimLoaded = true; a.victim.visible = false; } break; }
+      case 'tow': {
+        const a = mpAcc(d.spot); if(!a) break;
+        const car = d.w === 2 ? a.wreck2 : a.wreck;
+        if(car && car.parent === a.mesh) a.mesh.remove(car);
+        if(d.gone) mpRemoveAccident(a);
+        break;
+      }
+      case 'accGone': { const a = mpAcc(d.spot); if(a) mpRemoveAccident(a); break; }
+      case 'accNew': if(mpNum(d.idx) && mpNum(d.seed)) spawnAccident(d.idx|0, d.seed|0); break;
+      case 'fireOut': {
+        const f = fires.find(f => f.spotIdx === d.spot);
+        if(f){ scene.remove(f.mesh); fires.splice(fires.indexOf(f),1); }
+        break;
+      }
+      case 'fireNew': if(mpNum(d.idx)) spawnFire(d.idx|0); break;
+    }
+  }
+  function mpSnapshot(){
+    return { t:'snap', i:mp.id,
+      acc: accidents.map(a => ({ s:a.spotIdx, seed:a.seed, tr:a.victimTreated?1:0, st:a.treatedStand?1:0, it:a.interrogated?1:0, ld:a.victimLoaded?1:0,
+                                 w1:(a.wreck && a.wreck.parent === a.mesh)?1:0, w2:(a.wreck2 && a.wreck2.parent === a.mesh)?1:0 })),
+      fi: fires.map(f => f.spotIdx),
+      co: activeCones.filter(c => c.userData.cid).map(c => ({ id:c.userData.cid, x:Math.round(c.position.x*100)/100, z:Math.round(c.position.z*100)/100 })) };
+  }
+  function mpApplySnapshot(d){
+    if(!Array.isArray(d.acc) || !Array.isArray(d.fi) || !Array.isArray(d.co)) return;
+    accidents.slice().forEach(a => mpRemoveAccident(a));
+    fires.slice().forEach(f => { scene.remove(f.mesh); });
+    fires.length = 0;
+    d.fi.forEach(sp => { if(mpNum(sp)) spawnFire(sp|0); });
+    d.acc.slice(0,12).forEach(o => {
+      if(!o || !mpNum(o.s) || !mpNum(o.seed)) return;
+      const a = spawnAccident(o.s|0, o.seed|0);
+      if(!a) return;
+      if(!o.w1 && a.wreck.parent === a.mesh) a.mesh.remove(a.wreck);
+      if(!o.w2 && a.wreck2.parent === a.mesh) a.mesh.remove(a.wreck2);
+      if(o.tr){
+        a.victimTreated = true; a.treatedStand = !!o.st;
+        if(o.st){ a.standT = 1; a.victim.rotation.x = 0; a.victim.position.y = 0; }
+      }
+      a.interrogated = !!o.it;
+      if(o.ld){ a.victimLoaded = true; a.victim.visible = false; }
+    });
+    activeCones.filter(c => c.userData.cid && !String(c.userData.cid).startsWith(mp.id + '-')).forEach(c => mpRemoveConeById(c.userData.cid));
+    d.co.slice(0,60).forEach(c => { if(c) mpAddRemoteCone(c.id, c.x, c.z); });
   }
 
   function mpMakeNameTag(name, r){
@@ -3253,7 +3375,7 @@
     }
     r.moving = Math.hypot(d.x - r.tx, d.z - r.tz) > 0.03;
     r.tx = d.x; r.tz = d.z; r.ta = d.a; r.cx = d.cx; r.cz = d.cz; r.ca = d.ca;
-    r.driving = !!d.d; r.siren = !!d.sr; r.last = performance.now();
+    r.driving = !!d.d; r.siren = !!d.sr; r.wr = !!d.wr; r.last = performance.now();
   }
   function mpRemoveRemote(id, silent){
     const r = mp.remotes.get(id);
@@ -3289,7 +3411,7 @@
       const pp = driving ? myCar.position : player.position;
       const r2 = v => Math.round(v*100)/100;
       mpBroadcast({ t:'s', n:mp.name, r:role, x:r2(pp.x), z:r2(pp.z), a:r2(driving ? myCar.rotation.y : player.rotation.y),
-                    cx:r2(myCar.position.x), cz:r2(myCar.position.z), ca:r2(myCar.rotation.y), d:driving?1:0, sr:sirenOn?1:0 });
+                    cx:r2(myCar.position.x), cz:r2(myCar.position.z), ca:r2(myCar.rotation.y), d:driving?1:0, sr:sirenOn?1:0, wr:mountedWreck?1:0 });
     }
     // --- show everybody else ---
     const now = performance.now();
@@ -3306,6 +3428,15 @@
       p.visible = !r.driving;
       updateWalkAnimation(p, dt, r.moving && !r.driving, 1);
       c.userData.occupants = r.driving ? 1 : 0;
+      if(r.role === 'laweta'){
+        if(r.wr && !c.userData.remoteWreck){
+          const w = createCar(0x555555, false);
+          w.position.set(DECK_MOUNT.x, DECK_MOUNT.y, DECK_MOUNT.z); w.scale.set(0.82, 0.82, 0.82);
+          c.add(w); c.userData.remoteWreck = w;
+        } else if(!r.wr && c.userData.remoteWreck){
+          c.remove(c.userData.remoteWreck); c.userData.remoteWreck = null;
+        }
+      }
       const L = c.userData.lights;
       if(L){
         if(r.siren){
@@ -3750,12 +3881,15 @@
     const cone = createCone();
     cone.position.copy(conePos);
     scene.add(cone);
+    cone.userData.cid = (mp.id || 'me') + '-' + (++mpConeSeq);
+    mpWorld('cone', { id: cone.userData.cid, x: Math.round(conePos.x*100)/100, z: Math.round(conePos.z*100)/100 });
     activeCones.push(cone);
     strazPlacedCones.push(cone);
     strazConeCount -= 1;
     updateEqHud();
     if(strazPlacedCones.length > STRAZ_CONE_MAX_ON_GROUND){
       const old = strazPlacedCones.shift();
+      if(old.userData.cid) mpWorld('coneRm', { id: old.userData.cid });
       scene.remove(old);
       const idx = activeCones.indexOf(old);
       if(idx !== -1) activeCones.splice(idx,1);
@@ -3811,6 +3945,7 @@
   }
 
   function clearAllCones(){
+    mpWorld('coneClear', {});
     activeCones.forEach(c => scene.remove(c));
     activeCones.length = 0;
     strazPlacedCones.length = 0;
