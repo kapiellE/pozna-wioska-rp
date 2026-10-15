@@ -1,0 +1,1 @@
+# Gra nie wymaga zewnętrznych bibliotek Pythona (server.py używa tylko biblioteki standardowej).
