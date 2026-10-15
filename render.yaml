@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: city-watch-rp
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn server:app
-    healthCheckPath: /health
-    autoDeploy: true
